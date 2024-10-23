@@ -8,6 +8,9 @@ import Department from '../Components/AdminAllocate';
 import CoursePage from '../Components/CoursePage';
 import AdminDashboard from '../Components/AdminDashboard';
 import AdminLog from '../Components/AdminLog';
+import AdminProfessor from '../Components/AdminProfessor';
+import AdminJms from '../Components/AdminJms';
+import FeedbackList from '../Components/FeedbackList';
 
 const AdminPage = () => {
   return (
@@ -19,12 +22,15 @@ const AdminPage = () => {
         </div>
         <div className="flex-1">
           <Routes>
-            <Route element={<AdminStudent />} path="/" />
+            <Route element={<AdminStudent />} path="/student" />
             <Route element={<AdminCourse />} path="/course" />
             <Route element={<Department />} path="/department" />
-            <Route element={<AdminDashboard />} path="/dashboard" />
+            <Route element={<AdminDashboard />} path="/" />
             <Route element={<CoursePage />} path="/department/:courseName" />
-            <Route element={<AdminLog />} path="/log" />
+            <Route element={<AdminLog />} path="/logs" />
+            <Route element={<AdminProfessor/>} path="/professors" />
+            <Route element={<AdminJms/>} path="/jms" />
+            <Route element={<FeedbackList/>} path="/feedback" />
           </Routes>
         </div>
       </div>

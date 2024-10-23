@@ -1,25 +1,37 @@
 import React from 'react';
 import { useLocation, Routes, Route } from 'react-router-dom';
-import LoginPage from './Pages/LoginPage';
+// import LoginPage from './Pages/LoginPage';
 import AdminPage from './Pages/AdminPage';
 import Department from './Pages/DepartmentPage';
 import Professor from './Pages/ProfessorPage';
-import Form from './Pages/Form';
+import StudentForm from './Pages/TAForm';
 import StudentState from './context/StudentState';
 import CourseState from './context/CourseState';
 import DepartmentState from './context/DepartmentState';
 import AuthState from './context/AuthState';
 import ProtectedRoute from './ProtectedRoutes';
-
+import ProfState from './context/ProfState';
+import LoginPage from './Pages/LoginPageAdv';
+import ForgotPassword from './Pages/ForgotPassword';
 const App = () => {
   return (
     <AuthState>
+      <ProfState>
       <StudentState>
         <CourseState>
           <DepartmentState>
             <Routes>
               <Route element={<LoginPage />} path="/" />
-              <Route element={<Form />} path="/TaForm" />
+              <Route element={<ForgotPassword />} path="/forgotPassword" />
+              <Route
+                element={
+                  <ProtectedRoute
+                    element={<StudentForm />}
+                    allowedRoles={['TA']}
+                  />
+                }
+                path="/TAForm"
+              />
               <Route
                 element={
                   <ProtectedRoute
@@ -51,6 +63,7 @@ const App = () => {
           </DepartmentState>
         </CourseState>
       </StudentState>
+      </ProfState>
     </AuthState>
   );
 };

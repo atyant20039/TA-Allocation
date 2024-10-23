@@ -3,6 +3,8 @@ const Course = require( "../models/Course" );
 const JM = require( "../models/JM" );
 const Professor = require( "../models/Professor" );
 const { getProfessors } = require( './professorController' );
+const Feedback = require( '../models/Feedback' );
+const Student = require( '../models/Student' );
 
 
 //@desc Get course by ID
@@ -38,6 +40,7 @@ const getCourse = asyncHandler( async ( req, res ) =>
         taStudentRatio: course.taStudentRatio,
         taRequired: course.taRequired,
         taAllocated: course.taAllocated,
+        antiPref: course.antiPref
     };
 
     res.status( 200 ).json( flattenedCourse );
@@ -59,7 +62,7 @@ const getCourses = asyncHandler( async ( req, res ) =>
     {
         if ( department )
         {
-            const departmentId = await JM.findOne( { department: department } ).select( '_id' );
+            const departmentId = await JM.exists( { department: department } );
             if ( departmentId )
             {
                 filter.department = departmentId._id;
@@ -67,7 +70,8 @@ const getCourses = asyncHandler( async ( req, res ) =>
         }
         if ( professor )
         {
-            const professorId = await Professor.findOne( { name: professor } ).select( '_id' );
+            var profname = professor.split( " (" )[ 0 ];
+            const professorId = await Professor.exists( { name: profname } );
             if ( professorId )
             {
                 filter.professor = professorId._id;
@@ -95,7 +99,8 @@ const getCourses = asyncHandler( async ( req, res ) =>
             totalStudents: course.totalStudents,
             taStudentRatio: course.taStudentRatio,
             taRequired: course.taRequired,
-            // taAllocated: course.taAllocated,
+            taAllocated: course.taAllocated,
+            antiPref: course.antiPref
         } ) );
 
         res.status( 200 ).json( flattenedCourses );
@@ -116,89 +121,103 @@ const addCourse = asyncHandler( async ( req, res ) =>
     {
         newCourses = [ newCourses ];
     }
-
     try
     {
-        var collidingCourses = [];
-        var invalidDeptCourses = [];
-        var invalidProfCourses = [];
+        var invalidCourses = [];
+        var validCourses = [];
 
-        for ( const newCourse of newCourses )
+        const jmDepartments = await JM.find( {}, { department: 1 } );
+        const jmDepartmentMap = jmDepartments.reduce( ( acc, department ) =>
         {
-            // Check if required fields are not empty and have correct values
-            if ( !newCourse.name || !newCourse.code || !newCourse.acronym || !newCourse.department || !newCourse.totalStudents || !newCourse.taStudentRatio )
+            acc[ department.department ] = department._id;
+            return acc;
+        }, {} );
+
+        const validateCourse = ( course ) =>
+        {
+            if ( !course.name || !course.code || !course.acronym || !course.department || !course.totalStudents || !course.taStudentRatio )
             {
-                return res.status( 400 ).json( { message: 'All required fields must be provided' } );
+                throw new Error( 'All required fields must be provided' );
             }
-
-            if ( parseInt( newCourse.taStudentRatio ) < 1 )
+            if ( parseInt( course.taStudentRatio ) < 1 )
             {
-                return res.status( 400 ).json( { message: 'TA to Student Ratio should be greater than 1' } );
+                throw new Error( 'TA to Student Ratio should be greater than 1' );
             }
-
-            if ( newCourse.taAllocated )
-            {
-                delete newCourse.taAllocated;
-            }
-
-            // Calculate taRequired
-            // newCourse.taRequired = Math.floor( newCourse.totalStudents / newCourse.taStudentRatio );
-
-            // Handle "department" reference
-            if ( newCourse.department )
-            {
-                var jmDepartment = await JM.findOne( { department: newCourse.department } );
-                if ( jmDepartment )
-                {
-                    newCourse.department = jmDepartment._id;
-                } else
-                {
-                    invalidDeptCourses.push( newCourse );
-                    continue; // Skip adding this course
-                }
-            }
-
-            // Handle "professor" reference
-            if ( newCourse.professor )
-            {
-                var professor = await Professor.findOne( { name: newCourse.professor } );
-                if ( professor )
-                {
-                    newCourse.professor = professor._id;
-                } else
-                {
-                    invalidProfCourses.push( newCourse );
-                    // newCourse.professor = null; // Assign null if professor not found
-                    continue; // Skip adding this course
-                }
-                console.log( professor )
-            }
-
-            // Check for collisions based on the index
-            const existingCourse = await Course.findOne( {
-                acronym: newCourse.acronym,
-                professor: newCourse.professor,
-                name: newCourse.name,
-            } );
-            if ( existingCourse )
-            {
-                collidingCourses.push( newCourse );
-            } else
-            {
-                // Add the course to the database
-                const createdCourse = await Course.create( newCourse );
-            }
-        }
-
-        // Prepare the response
-        const response = {
-            message: 'Courses added successfully',
-            collide: collidingCourses,
-            invalid_dept: invalidDeptCourses,
-            invalid_prof: invalidProfCourses,
         };
 
-        return res.status( 201 ).json( response );
+        await Promise.all( newCourses.map( async ( newCourse ) =>
+        {
+            try
+            {
+                validateCourse( newCourse );
+                if ( newCourse.taAllocated ) { delete newCourse.taAllocated }
+                if ( newCourse.professor )
+                {
+                    const professor = await Professor.exists( { name: newCourse.professor } );
+                    if ( professor )
+                    {
+                        newCourse.professor = professor._id;
+                    } else
+                    {
+                        invalidCourses.push( {
+                            course: newCourse,
+                            message: "Professor not found"
+                        } );
+                        return;
+                    }
+                }
+
+                const jmDepartmentId = jmDepartmentMap[ newCourse.department ];
+                if ( jmDepartmentId )
+                {
+                    newCourse.department = jmDepartmentId;
+                } else
+                {
+                    invalidCourses.push( {
+                        course: newCourse,
+                        message: "Invalid department"
+                    } );
+                    return;
+                }
+
+                if ( !newCourse.taRequired || newCourse.taRequired == undefined )
+                {
+                    newCourse.taRequired = Math.floor( newCourse.totalStudents / newCourse.taStudentRatio );
+                }
+                validCourses.push( newCourse );
+
+                // const jmDepartment = await JM.exists( { department: course.department } );
+                // if ( jmDepartment ) { course.department = jmDepartment._id }
+                // else
+                // {
+                //     invalidCourses.push( course );
+                // }
+            } catch ( error )
+            {
+                invalidCourses.push( {
+                    course: newCourse,
+                    message: error.message
+                } );
+            }
+        } ) );
+
+        const bulkOps = validCourses.map( ( course ) => ( {
+            updateOne: {
+                filter: { acronym: course.acronym, professor: course.professor, name: course.name },
+                update: { $set: course },
+                upsert: true
+            }
+        } ) );
+
+        if ( bulkOps.length > 0 )
+        {
+            await Course.collection.bulkWrite( bulkOps, { ordered: false } );
+        }
+
+        return res.status( 201 ).json( {
+            message: 'Courses added successfully',
+            invalidCourses: invalidCourses,
+        } );
     } catch ( error )
     {
         return res.status( 500 ).json( { message: 'Internal server error', error: error.message } );
@@ -213,6 +232,8 @@ const updateCourse = asyncHandler( async ( req, res ) =>
     const courseId = req.params.id;
     const updates = req.body;
 
+    console.log( updates );
+
     try
     {
         var course = await Course.findById( courseId );
@@ -223,7 +244,7 @@ const updateCourse = asyncHandler( async ( req, res ) =>
 
         if ( updates.department )
         {
-            const jmDepartment = await JM.findOne( { department: updates.department } );
+            const jmDepartment = await JM.exists( { department: updates.department } );
             if ( !jmDepartment )
             {
                 return res.status( 400 ).json( { message: 'Invalid Department value' } );
@@ -233,7 +254,8 @@ const updateCourse = asyncHandler( async ( req, res ) =>
 
         if ( updates.professor )
         {
-            const professor = await Professor.findOne( { name: updates.professor } );
+            var profname = updates.professor.split( " (" )[ 0 ];
+            const professor = await Professor.exists( { name: profname } );
             if ( !professor )
             {
                 return res.status( 400 ).json( { message: 'Invalid Professor value' } );
@@ -251,7 +273,7 @@ const updateCourse = asyncHandler( async ( req, res ) =>
             }
 
             // Check if taRequired is updated
-            if ( updates.taRequired )
+            if ( updates.taRequired && course.taRequired != updates.taRequired )
             {
                 // If taRequired is updated, do nothing, save the provided value
             } else
@@ -295,10 +317,35 @@ const deleteCourse = asyncHandler( async ( req, res ) =>
         var studentIds = course.taAllocated;
 
         // Step 3: Set taAllocated to null for students in the list
+        if ( studentIds !== null && studentIds.length !== 0 )
+        {
+            await Student.updateMany(
+                { _id: { $in: studentIds } },
+                { $set: { allocatedTA: null } }
+            );
+        }
+
         await Student.updateMany(
-            { _id: { $in: studentIds } },
-            { $set: { allocatedTA: null } }
+            {
+                $or: [
+                    { 'departmentPreferences.course': courseId },
+                    { 'nonDepartmentPreferences.course': courseId },
+                    { nonPreferences: courseId }
+                ]
+            },
+            {
+                $set: {
+                    'departmentPreferences.$[elem].course': null,
+                    'departmentPreferences.$[elem].grade': null,
+                    'nonDepartmentPreferences.$[elem].course': null,
+                    'nonDepartmentPreferences.$[elem].grade': null,
+                },
+                $pull: { nonPreferences: courseId }
+            },
+            { arrayFilters: [ { 'elem.course': courseId } ] }
         );
+
+        await Feedback.deleteMany( { course: courseId } )
 
         // Step 4: Delete the course
         await Course.findByIdAndRemove( courseId );
@@ -312,20 +359,23 @@ const deleteCourse = asyncHandler( async ( req, res ) =>
     }
 } );
 
-const ProfessorCourses = asyncHandler(async (req, res) => {
-    try {
-      // Assuming you're sending the professor's ID in the request body
-      const professorId = req.body.professor;
-      // Find courses taught by the professor
-      const coursesTaught = await Course.find({ professor: professorId });
-  
-      res.json({ success: true, courses: coursesTaught });
-    } catch (error) {
-      console.error('Error fetching professor courses:', error);
-      res.status(500).json({ success: false, error: 'Internal Server Error' });
+const ProfessorCourses = asyncHandler( async ( req, res ) =>
+{
+    try
+    {
+        // Assuming you're sending the professor's ID in the request body
+        const professorId = req.body.professor;
+        // Find courses taught by the professor
+        const coursesTaught = await Course.find( { professor: professorId } );
+
+        res.json( { success: true, courses: coursesTaught } );
+    } catch ( error )
+    {
+        console.error( 'Error fetching professor courses:', error );
+        res.status( 500 ).json( { success: false, error: 'Internal Server Error' } );
     }
-  });
-  
+} );
 
 
-module.exports = { getCourse, addCourse, updateCourse, deleteCourse, getCourses,ProfessorCourses };
+
+module.exports = { getCourse, addCourse, updateCourse, deleteCourse, getCourses, ProfessorCourses };

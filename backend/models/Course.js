@@ -37,6 +37,11 @@ const courseSchema = new mongoose.Schema( {
         required: true,
         min: 1
     },
+    antiPref: {
+        type: Number,
+        required: true,
+        default: 0
+    },
     taRequired: {
         type: Number,
         default: function ()
@@ -51,6 +56,7 @@ const courseSchema = new mongoose.Schema( {
     } ],
 } );
 
+
 courseSchema.index( { acronym: 1, professor: 1, name: 1 }, { unique: true } );
 
-module.exports = mongoose.model( 'Course', courseSchema );;
+module.exports = mongoose.model( 'Course', courseSchema );

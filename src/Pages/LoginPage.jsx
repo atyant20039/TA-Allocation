@@ -1,10 +1,11 @@
-import React, { useState ,useContext, useEffect} from "react";
+import CryptoJS from "crypto-js";
+import { jwtDecode } from "jwt-decode";
+import React, { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom"; // Import useNavigate
-import {jwtDecode }from 'jwt-decode'; 
-import AuthContext from '../context/AuthContext';
-import DepartmentContext from "../context/DepartmentContext";
-import CourseContext from "../context/CourseContext";
 import ClipLoader from "react-spinners/ClipLoader";
+import AuthContext from "../context/AuthContext";
+import CourseContext from "../context/CourseContext";
+import DepartmentContext from "../context/DepartmentContext";
 const LoginPage = () => {
   const [selectedOption, setSelectedOption] = useState("");
   const [email, setEmail] = useState("");
@@ -14,11 +15,14 @@ const LoginPage = () => {
   const [OtpSent, setOtpSent] = useState(false);
   const [Otp, setOtp] = useState("");
   const navigate = useNavigate();
-  const host = "http://localhost:5001";
-  const {login} = useContext(AuthContext);
-  const {setSelectedDepartment} = useContext(DepartmentContext);
-  const {setSelectedCourse} =useContext(CourseContext);
+  const host = import.meta.env.VITE_API_URL;
+  const { login } = useContext(AuthContext);
+  const { setSelectedDepartment } = useContext(DepartmentContext);
+  const { setSelectedCourse } = useContext(CourseContext);
   const [loading, setLoading] = useState();
+  const [encryptedEmail, setEncryptedEmail] = useState("A");
+  const [studentExist, setStudentExist] = useState();
+  const [studentExistDepartment, setStudentExistDepartment] = useState();
 
   const startLoader = () => {
     setLoading(true);
@@ -29,7 +33,8 @@ const LoginPage = () => {
   };
 
   useEffect(() => {
-    startLoader(); stopLoader();
+    startLoader();
+    stopLoader();
   }, []);
 
   const handleLoginOptionClick = (option) => {
@@ -47,7 +52,6 @@ const LoginPage = () => {
   };
 
   const handleAdminLogin = async (e) => {
-    console.log("admin tried");
     // Handle admin login logic here
     if (email && password) {
       const response = await fetch(`${host}/api/login/admin`, {
@@ -59,20 +63,19 @@ const LoginPage = () => {
       });
 
       const json = await response.json();
-      console.log(json);
-    
+
       if (json.success) {
-        localStorage.setItem("token",json.authtoken)
+        localStorage.setItem("token", json.authtoken);
         const decodedToken = jwtDecode(json.authtoken); // Decode the JWT token
         const userData = {
-          role:  decodedToken.user['role'],
-          id: decodedToken.user['id'],
+          role: decodedToken.user["role"],
+          id: decodedToken.user["id"],
           // department:decodedToken.user['department'],
         };
         login(userData);
-        navigate('/admin');
+        navigate("/admin");
       } else {
-        alert('Login Error');
+        alert("Login Error");
       }
     } else {
       alert("Please fill in both email and password fields.");
@@ -80,7 +83,6 @@ const LoginPage = () => {
   };
 
   const handleDepartmentLogin = async () => {
-    console.log("Department (JM) tried");
     // Handle Department (JM) login logic here
     if (email && password) {
       const response = await fetch(`${host}/api/login/JM`, {
@@ -90,33 +92,29 @@ const LoginPage = () => {
         },
         body: JSON.stringify({ email_id: email, password: password }),
       });
-  
+
       const json = await response.json();
-      console.log(json);
-      
+
       if (json.success) {
-        localStorage.setItem("token",json.authtoken)
+        localStorage.setItem("token", json.authtoken);
         const decodedToken = jwtDecode(json.authtoken); // Decode the JWT token
-        console.log(decodedToken)
         const userData = {
-          role:  decodedToken.user['role'],
-          id: decodedToken.user['id'],
-          department:decodedToken.user['department'],
+          role: decodedToken.user["role"],
+          id: decodedToken.user["id"],
+          department: decodedToken.user["department"],
         };
         login(userData);
-        setSelectedDepartment(userData.department)
-        navigate('/department');
+        setSelectedDepartment(userData.department);
+        navigate("/department");
       } else {
-        alert('Login Error');
+        alert("Login Error");
       }
     } else {
       alert("Please fill in both email and password fields.");
     }
   };
-  
 
   const handleProfessorLogin = async () => {
-    console.log("Professor tried");
     // Handle Professor login logic here
     if (email && password) {
       const response = await fetch(`${host}/api/login/Professor`, {
@@ -126,38 +124,43 @@ const LoginPage = () => {
         },
         body: JSON.stringify({ email_id: email, password: password }),
       });
-  
+
       const json = await response.json();
-      console.log(json);
       if (json.success) {
-        localStorage.setItem("token",json.authtoken)
+        localStorage.setItem("token", json.authtoken);
         const decodedToken = jwtDecode(json.authtoken); // Decode the JWT token
         const userData = {
-          role:  decodedToken.user['role'],
-          id: decodedToken.user['id'],
-          department:decodedToken.user['department'],
+          role: decodedToken.user["role"],
+          id: decodedToken.user["id"],
+          department: decodedToken.user["department"],
         };
         login(userData);
         // setSelectedDepartment(userData.department)
         // setSelectedCourse(userData.courses)
-        navigate('/professor');
+        navigate("/professor",{state: {name: json.name}});
       } else {
-        alert('Login Error');
+        alert("Login Error");
       }
     } else {
       alert("Please fill in both email and password fields.");
     }
   };
-  
 
   const handleTAForm = () => {
     if (email) {
-      console.log(email);
     }
   };
   const handleSendOTP = async () => {
-    console.log(email);
     if (email) {
+      // if (!email.endsWith("@iiitd.ac.in")) {
+      //   alert("Only IIITD Students allowed");
+      //   return;
+      // }
+      const emailRegex = /^[^\s@]+@iiitd.ac.in$/;
+      if (!emailRegex.test(email)){
+        alert("Only IIITD Students allowed");
+        return;
+      }
       startLoader();
       const response = await fetch(`${host}/api/login/sendotp`, {
         method: "POST",
@@ -170,7 +173,11 @@ const LoginPage = () => {
       const json = await response.json();
       if (json.success) {
         setOtpSent(true);
-        stopLoader();
+        setStudentExist(json.studentExist);
+        setStudentExistDepartment(json.department);
+        setTimeout(() => {
+          stopLoader();
+        }, 1600);
       } else {
         stopLoader();
         alert("Failed to send OTP.");
@@ -180,7 +187,6 @@ const LoginPage = () => {
     }
   };
   const handleVerifyOTP = async () => {
-    console.log(Otp);
     if (email && Otp) {
       const response = await fetch(`${host}/api/login/verifyOTP`, {
         method: "POST",
@@ -192,7 +198,11 @@ const LoginPage = () => {
 
       const json = await response.json();
       if (json.success) {
-        navigate("/TAform", { state: { email } }); 
+        const eEmail = encryptEmail(email);
+        setEncryptedEmail(eEmail);
+        navigate("/TAform", {
+          state: { email, encryptedEmail: eEmail, studentExist: studentExist, department: studentExistDepartment },
+        });
         // Redirect to the appropriate page after OTP verification
       } else {
         alert("Invalid OTP.");
@@ -202,11 +212,16 @@ const LoginPage = () => {
     }
   };
 
+  const encryptEmail = (email) => {
+    const secretKey = "your-secret-key";
+    const encryptedEmail = CryptoJS.AES.encrypt(email, secretKey).toString();
+    return encryptedEmail;
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
 
     if (signInButton) {
-      console.log(selectedOption);
       switch (selectedOption) {
         case "admin":
           handleAdminLogin();
@@ -221,7 +236,7 @@ const LoginPage = () => {
           handleTAForm();
           break;
         default:
-          alert("Please select an option: Admin, Department, Professor.");
+          alert("Please select an option: Admin, Department, Faculty.");
           break;
       }
     }
@@ -249,56 +264,62 @@ const LoginPage = () => {
           <p className="text-gray-600 text-xs mt-2">For students:</p>
           <div>
             <button
+              type="button"
               className="w-full my-2 py-2 bg-[#3dafaa] shadow-lg shadow-[#3dafaa]/50 hover:shadow-[#3dafaa]/40 text-white font-semibold rounded-lg"
               onClick={() => handleLoginOptionClick("TA")}
+              disabled={OtpSent}
             >
               TA Form
             </button>
           </div>
           {!TaOptionSelected ? (
-          <>
-          <hr className="border-2 border-[#7d7f7f]" />
-          <p className="text-gray-600 text-xs mt-2">Log in as:</p>
-          <div className="flex-auto mt-1">
-            <button
-              className={`px-4 py-2 rounded-full cursor-pointer border ${
-                selectedOption === "admin"
-                  ? "bg-[#3dafaa] text-white"
-                  : "border-[#3dafaa] hover:bg-[#3dafaa] hover:text-white"
-              } outline-none focus:border-[#3dafaa]`}
-              onClick={() => handleLoginOptionClick("admin")}
-            >
-              Admin
-            </button>
-            <button
-              className={`px-4 py-2 rounded-full cursor-pointer border ${
-                selectedOption === "department"
-                  ? "bg-[#3dafaa] text-white"
-                  : "border-[#3dafaa] hover:bg-[#3dafaa] hover:text-white mx-1"
-              } outline-none focus:border-[#3dafaa]`}
-              onClick={() => handleLoginOptionClick("department")}
-            >
-              Department
-            </button>
-            <button
-              className={`px-4 py-2 rounded-full cursor-pointer border ${
-                selectedOption === "professor"
-                  ? "bg-[#3dafaa] text-white"
-                  : "border-[#3dafaa] hover:bg-[#3dafaa] hover:text-white"
-              } outline-none focus:border-[#3dafaa]`}
-              onClick={() => handleLoginOptionClick("professor")}
-            >
-              Professor
-            </button>
-          </div>
-          </>):(null)}
+            <>
+              <hr className="border-2 border-[#7d7f7f]" />
+              <p className="text-gray-600 text-xs mt-2">Log in as:</p>
+              <div className="flex-auto mt-1">
+                <button
+                  type="button"
+                  className={`px-4 py-2 rounded-full cursor-pointer border ${
+                    selectedOption === "admin"
+                      ? "bg-[#3dafaa] text-white"
+                      : "border-[#3dafaa] hover:bg-[#3dafaa] hover:text-white"
+                  } outline-none focus:border-[#3dafaa]`}
+                  onClick={() => handleLoginOptionClick("admin")}
+                >
+                  Admin
+                </button>
+                <button
+                  type="button"
+                  className={`px-4 py-2 rounded-full cursor-pointer border ${
+                    selectedOption === "department"
+                      ? "bg-[#3dafaa] text-white"
+                      : "border-[#3dafaa] hover:bg-[#3dafaa] hover:text-white mx-1"
+                  } outline-none focus:border-[#3dafaa]`}
+                  onClick={() => handleLoginOptionClick("department")}
+                >
+                  Department
+                </button>
+                <button
+                  type="button"
+                  className={`px-4 py-2 rounded-full cursor-pointer border ${
+                    selectedOption === "professor"
+                      ? "bg-[#3dafaa] text-white"
+                      : "border-[#3dafaa] hover:bg-[#3dafaa] hover:text-white"
+                  } outline-none focus:border-[#3dafaa]`}
+                  onClick={() => handleLoginOptionClick("professor")}
+                >
+                  Faculty
+                </button>
+              </div>
+            </>
+          ) : null}
           <div className="justify-center items-center"></div>
 
           {!OtpSent ? (
             loading ? (
               <div className="flex justify-center">
                 <ClipLoader
-                  color={'#3dafaa'}
+                  color={"#3dafaa"}
                   loading={loading}
                   size={100}
                   aria-label="Loading Spinner"
@@ -306,19 +327,19 @@ const LoginPage = () => {
                 />
               </div>
             ) : (
-            <div className="flex flex-col text-black py-2">
-              <label>Email Id</label>
-              <input
-                className="text-black rounded-lg bg-white mt-2 p-2 border-2 border-gray-500 focus:bg-gray-200 focus:outline-none"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
+              <div className="flex flex-col text-black py-2">
+                <label>Email Id</label>
+                <input
+                  className="text-black rounded-lg bg-white mt-2 p-2 border-2 border-gray-500 focus:bg-gray-200 focus:outline-none"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
             )
           ) : (
             <div className="flex flex-col text-black py-2">
-              <label>Enter Otp</label>
+              <label>Enter OTP</label>
               <input
                 className="text-black rounded-lg bg-white mt-2 p-2 border-2 border-gray-500 focus:bg-gray-200 focus:outline-none"
                 type="Otp"
@@ -327,7 +348,14 @@ const LoginPage = () => {
               />
             </div>
           )}
-
+            {OtpSent ? (
+              !loading ? (
+                <div className="flex">
+                  <p className="text-gray-600 text-xs mr-1">OTP sent to </p>
+                  <p className="text-red-500 text-xs">{email}</p>
+                </div>
+              ) : (null)
+            ):(null)}
           {!TaOptionSelected ? (
             <>
               <div className="flex flex-col text-black py-2">
@@ -340,7 +368,7 @@ const LoginPage = () => {
                 />
               </div>
               <div className="flex justify-between text-gray-600 py-2">
-                <p>Forgot Password?</p>
+                <a>Forgot Password?</a>
               </div>
               <button
                 type="submit"
@@ -351,6 +379,9 @@ const LoginPage = () => {
               </button>
             </>
           ) : (
+            loading ? (
+              null
+            ) : (
             <button
               type="submit"
               className="w-full my-5 py-2 bg-[#3dafaa] shadow-lg shadow-[#3dafaa]/50 hover:shadow-[#3dafaa]/40 text-white font-semibold rounded-lg"
@@ -358,6 +389,7 @@ const LoginPage = () => {
             >
               {OtpSent ? "Verify OTP" : "Send OTP"}
             </button>
+            )
           )}
         </form>
       </div>

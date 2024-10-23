@@ -8,10 +8,6 @@ const jmSchema = new mongoose.Schema(
             required: true,
             unique: true,
         },
-        password: {
-            type: String,
-            required: true,
-        },
         department: {
             type: String,
             required: true,
@@ -25,25 +21,6 @@ const jmSchema = new mongoose.Schema(
     }
 );
 
-// jmSchema.pre( 'save', async function ( next )
-// {
-//     const user = this;
-
-//     // Check if the password has been modified
-//     if ( !user.isModified( 'password' ) ) return next();
-
-//     try
-//     {
-//         // Hash the password
-//         const hash = await argon2.hash( user.password );
-//         user.password = hash;
-//         next();
-//     } catch ( err )
-//     {
-//         return next( err );
-//     }
-// } );
-
 module.exports = mongoose.model( 'JM', jmSchema );
 
 // await session.commitTransaction();
@@ -55,8 +32,8 @@ module.exports = mongoose.model( 'JM', jmSchema );
 // const transporter = nodemailer.createTransport({
 //     service: "Gmail",
 //     auth: {
-//       user: "arnav20363@iiitd.ac.in",
-//       pass: "meatiiitdelhi@123", // use env file for this data , also kuch settings account ki change krni padti vo krliyo
+//       user: process.env.USERMAIL,
+//       pass: process.env.PASS, // use env file for this data , also kuch settings account ki change krni padti vo krliyo
 //     },
 //   });
   

@@ -4,20 +4,23 @@ const Student = require( "../models/Student" );
 const Course = require( "../models/Course" );
 const JM = require( "../models/JM" );
 const nodemailer = require( 'nodemailer' );
+const LogEntry = require( "../models/LogEntry" );
+const Feedback = require( "../models/Feedback" );
+const validateStudents = require( "../middleware/StudentValidator" );
 
 const transporter = nodemailer.createTransport( {
   service: 'Gmail',
   auth: {
-    user: 'arnav20363@iiitd.ac.in',
-    pass: 'meatiiitdelhi@123', // use env file for this data , also kuch settings account ki change krni padti vo krliyo
+    user: process.env.USERMAIL,
+    pass: process.env.PASS, // use env file for this data , also kuch settings account ki change krni padti vo krliyo
   },
 } );
 
 const sendForm = asyncHandler( async ( email, studentData ) =>
 {
-  console.log( studentData )
 
   const department = await JM.findById( studentData.department, { department: 1 } ).lean();
+
   const departmentPreferences = await Promise.all(
     studentData.departmentPreferences.map( async pref =>
     {
@@ -64,7 +67,14 @@ const sendForm = asyncHandler( async ( email, studentData ) =>
         </style>
       </head>
       <body>
-        <h1>Student Form Data</h1>
+        <h1>Student TAship Form Preference</h1>
+        <p>
+          Dear Student,<br/>
+          You have filled below details in your TAship Form. Kindly check your details and edit your response in case of any error.<br/>
+          This is an Auto Generated Email. Please do not reply to this mail.<br/>
+          For TA related concerns, please contact respective department admin. <br/>
+          For any other concern, write an email to <a href="mailto:mohit@iiitd.ac.in">mohit@iiitd.ac.in</a>
+        </p>
         <p>Name: <strong>${ studentData.name }</strong></p>
         <p>Email: <strong>${ studentData.emailId }</strong></p>
         <p>Roll No: <strong>${ studentData.rollNo }</strong></p>
@@ -141,7 +151,7 @@ const sendForm = asyncHandler( async ( email, studentData ) =>
   const mailOptions = {
     from: 'btp3517@gmail.com',
     to: email,
-    subject: 'Student Form Data',
+    subject: 'Student TAship Form Preference',
     html: htmlContent,
   };
 
@@ -149,32 +159,12 @@ const sendForm = asyncHandler( async ( email, studentData ) =>
 } );
 
 
-
 //@desc Get student by ID
 //@route GET /api/student/:id
 //@access public
 const getStudent = asyncHandler( async ( req, res ) =>
 {
-  const student = await Student.findById( req.params.id ).populate( {
-    path: 'department',
-    select: 'department -_id'
-  } )
-    .populate( {
-      path: 'allocatedTA',
-      select: 'name -_id'
-    } )
-    .populate( {
-      path: 'departmentPreferences.course',
-      select: 'name -_id'
-    } )
-    .populate( {
-      path: 'nonDepartmentPreferences.course',
-      select: 'name -_id'
-    } )
-    .populate( {
-      path: 'nonPreferences',
-      select: 'name -_id'
-    } );
+  const student = await Student.findById( req.params.id )
 
   if ( !student || student.length === 0 )
   {
@@ -182,29 +172,7 @@ const getStudent = asyncHandler( async ( req, res ) =>
     throw new Error( "No Student Found" );
   }
 
-  const flatStudent = {
-    _id: student._id,
-    name: student.name,
-    emailId: student.emailId,
-    rollNo: student.rollNo,
-    program: student.program,
-    department: student.department ? student.department.department : null,
-    taType: student.taType,
-    allocationStatus: student.allocationStatus,
-    allocatedTA: student.allocatedTA ? student.allocatedTA.name : null,
-    nonPreferences: student.nonPreferences.map( preference => preference ? preference.name : null ),
-    departmentPreferences: student.departmentPreferences.map( preference => ( {
-      course: preference.course ? preference.course.name : null,
-      grade: preference.grade
-    } ) ),
-    nonDepartmentPreferences: student.nonDepartmentPreferences.map( preference => ( {
-      course: preference.course ? preference.course.name : null,
-      grade: preference.grade
-    } ) ),
-    __v: student.__v
-  };
-
-  res.status( 200 ).json( flatStudent );
+  res.status( 200 ).json( student.flatStudent );
 } );
 
 //@desc Get filtered students
@@ -237,9 +205,7 @@ const getStudents = asyncHandler( async ( req, res ) =>
   {
     if ( department )
     {
-      const departmentId = await JM.findOne( { department: department } ).select(
-        "_id"
-      );
+      const departmentId = await JM.exists( { department: department } );
       if ( departmentId )
       {
         filter.department = departmentId._id;
@@ -275,35 +241,11 @@ const getStudents = asyncHandler( async ( req, res ) =>
     }
 
     const filteredStudents = await Student.find( filter )
-      .populate( 'department', 'department -_id' )
-      .populate( 'allocatedTA', 'name -_id' )
-      .populate( 'nonPreferences', 'name -_id' )
-      .populate( 'departmentPreferences.course', 'name -_id' )
-      .populate( 'nonDepartmentPreferences.course', 'name -_id' );
-    const flatStudents = filteredStudents.map( student => ( {
-      _id: student._id,
-      name: student.name,
-      emailId: student.emailId,
-      rollNo: student.rollNo,
-      program: student.program,
-      department: student.department ? student.department.department : null,
-      taType: student.taType,
-      allocationStatus: student.allocationStatus,
-      allocatedTA: student.allocatedTA ? student.allocatedTA.name : null,
-      nonPreferences: student.nonPreferences.map( preference => preference ? preference.name : null ),
-      departmentPreferences: student.departmentPreferences.map( preference => ( {
-        course: preference.course ? preference.course.name : null,
-        grade: preference.grade
-      } ) ),
-      nonDepartmentPreferences: student.nonDepartmentPreferences.map( preference => ( {
-        course: preference.course ? preference.course.name : null,
-        grade: preference.grade
-      } ) ),
-      __v: student.__v
-    } ) );
+    const flatStudents = filteredStudents.map( student => student.flatStudent )
 
     res.status( 200 ).json( flatStudents );
-  } catch {
+  } catch
+  {
     return res
       .status( 500 )
       .json( { message: "Internal server error", error: error.message } );
@@ -313,7 +255,7 @@ const getStudents = asyncHandler( async ( req, res ) =>
 // Function to get Course ID by name
 async function getCourseIdByName ( courseName )
 {
-  const course = await Course.findOne( { name: courseName } );
+  const course = await Course.exists( { name: courseName } );
   return course ? course._id : null;
 }
 
@@ -322,7 +264,6 @@ async function getCourseIdByName ( courseName )
 //@access public
 const addStudent = asyncHandler( async ( req, res ) =>
 {
-  console.log( "req" )
   var newStudents = req.body;
 
   // Check if the request body is an array
@@ -332,179 +273,44 @@ const addStudent = asyncHandler( async ( req, res ) =>
     newStudents = [ newStudents ];
   }
 
-
   try
   {
-    var invalidStudents = [];
-    var validStudents = [];
 
-    // Iterate through the new student entries
-    for ( const newStudent of newStudents )
-    {
-      // Check if all required fields are present
-      const requiredFields = [
-        "name",
-        "emailId",
-        "rollNo",
-        "program",
-        "department",
-        "taType",
-      ];
-      const missingFields = requiredFields.filter(
-        ( field ) => !newStudent[ field ]
-      );
-
-      if ( missingFields.length > 0 )
-      {
-        invalidStudents.push( {
-          student: newStudent,
-          message: `Missing required fields: ${ missingFields.join( ", " ) }`,
-        } );
-        continue; // Skip this student and move to the next one
-      }
-
-
-      // Validate program against enum list
-      const validPrograms = [
-        "B.Tech 3rd Year",
-        "B.Tech 4th Year",
-        "M.Tech",
-        "PhD",
-      ];
-      if ( !validPrograms.includes( newStudent.program ) )
-      {
-        invalidStudents.push( {
-          student: newStudent,
-          message: "Invalid program value",
-        } );
-        continue; // Skip this student and move to the next one
-      }
-
-      // Check cgpa range
-      if ( newStudent.cgpa < 0 || newStudent.cgpa > 10 )
-      {
-        invalidStudents.push( {
-          student: newStudent,
-          message: "CGPA out of range (0-10)",
-        } );
-        continue; // Skip this student and move to the next one
-      }
-
-      // Check for collision based on emailId or rollNo
-      const existingStudent = await Student.findOne( {
-        $or: [ { emailId: newStudent.emailId }, { rollNo: newStudent.rollNo } ],
-      } );
-
-      if ( existingStudent )
-      {
-        // If a collision exists, add it to the invalidStudents list
-        invalidStudents.push( {
-          student: newStudent,
-          message: "Duplicate emailId or rollNo",
-        } );
-      } else
-      {
-        // Validate the department reference
-        const jmDepartment = await JM.findOne( {
-          department: newStudent.department,
-        } );
-        if ( !jmDepartment )
-        {
-          invalidStudents.push( {
-            student: newStudent,
-            message: "Invalid department name",
-          } );
-        } else
-        {
-          // Remove attributes that should not be provided during creation
-          if ( newStudent.allocatedTA )
-          {
-            delete newStudent.allocatedTA;
-          }
-          if ( newStudent.allocationStatus !== null && newStudent.allocationStatus !== undefined )
-          {
-            delete newStudent.allocationStatus;
-          }
-
-          // Validate departmentPreferences
-
-          if (
-            newStudent.departmentPreferences &&
-            newStudent.nonDepartmentPreferences &&
-            newStudent.nonPreferences ) // wrapper check
-          {
-            if ( newStudent.departmentPreferences.length > 2 )
-            {
-              invalidStudents.push( {
-                student: newStudent,
-                message: "More than allowed department preferences entered",
-              } );
-              continue; // Skip this student and move to the next one
-            }
-
-            // Validate nonDepartmentPreferences
-            if ( newStudent.nonDepartmentPreferences.length > 5 )
-            {
-              invalidStudents.push( {
-                student: newStudent,
-                message: "More than allowed normal preferences entered",
-              } );
-              continue; // Skip this student and move to the next one
-            }
-
-            // Validate nonPreferences
-            if ( newStudent.nonPreferences.length > 3 )
-            {
-              invalidStudents.push( {
-                student: newStudent,
-                message: "More than allowed non preferences entered",
-              } );
-              continue; // Skip this student and move to the next one
-            }
-
-            // Check if all courses in departmentPreferences are from the same department as the student
-
-            const departmentMatch = await Promise.all(
-              newStudent.departmentPreferences.map( async ( pref ) =>
-              {
-                const course = await mongoose
-                  .model( "Course" )
-                  .findById( pref.course );
-                return course && course.department.equals( jmDepartment._id );
-              } )
-            );
-
-            if ( departmentMatch.includes( false ) )
-            {
-              invalidStudents.push( {
-                student: newStudent,
-                message:
-                  "Course department must match student department for all courses in department preferences",
-              } );
-              continue; // Skip this student and move to the next one
-            }
-          }
-          // Add the validated student to the validStudents list
-          newStudent.department = jmDepartment._id;
-          validStudents.push( newStudent );
-        }
-      }
-    }
-    console.log( "here" )
+    const { validStudents, invalidStudents } = await validateStudents( newStudents )
 
     // Insert valid students into the database
-    await Student.insertMany( validStudents );
-    for ( const student of validStudents )
+    const returnedStudents = await Student.insertMany( validStudents, { ordered: false } );
+
+    const sendEmails = async ( students ) =>
     {
+      const validStudentsWithEmails = students.filter( student => student.departmentPreferences && student.departmentPreferences.length > 0 );
+      const emailPromises = validStudentsWithEmails.map( async ( student ) =>
+      {
+        try
+        {
+          await sendForm( student.emailId, student );
+        } catch ( error )
+        {
+          console.error( 'Error sending student data via email:', error );
+          throw new Error( error )
+        }
+      } );
+
       try
       {
-        await sendForm( student.emailId, student ); // Call the sendForm function for each student
+        await Promise.all( emailPromises );
+        console.log( 'All emails sent successfully' );
       } catch ( error )
       {
-        console.error( 'Error sending student data via email:', error );
-        // Handle the error as needed
+        console.error( 'Error sending emails:', error );
       }
-    }
+    };
+
+    sendEmails( validStudents );
+
+    const populatedStudents = await Student.find( { _id: { $in: returnedStudents.map( student => student._id ) } } )
+    const flatenedStudents = populatedStudents.map( student => student.flatStudent )
+    io.emit( 'studentsAdded', flatenedStudents );
 
     // Return a response with colliding and invalid students
     return res.status( 201 ).json( {
@@ -513,6 +319,7 @@ const addStudent = asyncHandler( async ( req, res ) =>
     } );
   } catch ( error )
   {
+    console.log( error )
     return res
       .status( 500 )
       .json( { message: "Internal server error", error: error.message } );
@@ -525,12 +332,12 @@ const addStudent = asyncHandler( async ( req, res ) =>
 const updateStudent = asyncHandler( async ( req, res ) =>
 {
   const studentId = req.params.id;
-  var updates = req.body;
-
+  let updates = req.body;
   try
   {
     // Step 1: Validate that the student exists
     const student = await Student.findById( studentId );
+
     if ( !student )
     {
       return res.status( 404 ).json( { message: "Student not found" } );
@@ -546,10 +353,38 @@ const updateStudent = asyncHandler( async ( req, res ) =>
       delete updates.allocatedTA;
     }
 
+    if ( "taType" in updates )
+    {
+      const validTypes = [
+        "Credit",
+        "Paid",
+        "Voluntary"
+      ]
+      if ( !validTypes.includes( updates.taType ) )
+      {
+        return res.status( 400 ).json( { message: "Invalid TA Type selected" } );
+      }
+    }
+
+    if ( "program" in updates )
+    {
+      const validPrograms = [
+        "B.Tech 3rd Year",
+        "B.Tech 4th Year",
+        "M.Tech 1st Year",
+        "M.Tech 2nd Year",
+        "PhD",
+      ];
+      if ( !validPrograms.includes( updates.program ) )
+      {
+        return res.status( 400 ).json( { message: "Invalid Program Selected" } );
+      }
+    }
+
     // Step 3: Update the department reference based on the department name
     if ( "department" in updates )
     {
-      const jmDepartment = await JM.findOne( { department: updates.department } );
+      const jmDepartment = await JM.exists( { department: updates.department } );
       if ( jmDepartment )
       {
         updates.department = jmDepartment._id;
@@ -559,23 +394,66 @@ const updateStudent = asyncHandler( async ( req, res ) =>
       }
     }
 
+    if ( "cgpa" in updates )
+    {
+      // Check cgpa range
+      if ( updates.cgpa < 0 || updates.cgpa > 10 )
+      {
+        return res.status( 400 ).json( { message: "Invalid CGPA value" } );
+      }
+    }
+
+    // Check for valid grade values
+    // const validGrades = [ 'A+(10)', 'A(10)', 'A-(9)', 'B(8)', 'B-(7)', 'C(6)', 'C-(5)', 'D(4)', 'Course Not Done' ]
+
     if (
-      "departmentPreferences" in updates &&
-      updates.departmentPreferences.length > 2
+      "departmentPreferences" in updates
     )
     {
-      return res
-        .status( 400 )
-        .json( { message: "Atmost 2 departmental preferences allowed" } );
+      if (
+        updates.departmentPreferences.length > 2
+      )
+      {
+        return res
+          .status( 400 )
+          .json( { message: "Atmost 2 departmental preferences allowed" } );
+      }
+
+      // const deptgrade = await Promise.all(
+      //   updates.departmentPreference.map( async ( pref ) =>
+      //   {
+      //     return validGrades.includes( pref.grade );
+      //   } )
+      // )
+
+      // if ( deptgrade.includes( false ) )
+      // {
+      //   return res.status( 400 ).json( { message: "Invalid Grade Value in departmental preferences" } );
+      // }
     }
     if (
-      "nonDepartmentPreferences" in updates &&
-      updates.nonDepartmentPreferences.length > 5
+      "nonDepartmentPreferences" in updates
     )
     {
-      return res
-        .status( 400 )
-        .json( { message: "Atmost 5 normal preferences allowed" } );
+      if ( updates.nonDepartmentPreferences.length > 5 )
+      {
+        return res
+          .status( 400 )
+          .json( { message: "Atmost 5 other preferences allowed" } );
+      }
+
+      // const othergrade = await Promise.all(
+      //   updates.nonDepartmentPreference.map( async ( pref ) =>
+      //   {
+      //     return validGrades.includes( pref.grade );
+      //   } )
+      // )
+
+
+      // if ( othergrade.includes( false ) )
+      // {
+      //   return res.status( 400 ).json( { message: "Invalid Grade Value in other preferences" } )
+      // }
     }
     if ( "nonPreferences" in updates && updates.nonPreferences.length > 3 )
     {
@@ -592,7 +470,7 @@ const updateStudent = asyncHandler( async ( req, res ) =>
         newDepartmentPrefs.map( async ( pref ) =>
         {
           const course = await Course.findById( pref.course );
-          return course && course.department.equals( student.department );
+          return course && course.department.equals( updates.department ? updates.department : student.department );
         } )
       );
 
@@ -608,9 +486,26 @@ const updateStudent = asyncHandler( async ( req, res ) =>
     }
 
     // Step 5: Update the student with validated values
-    const updatedStudent = await Student.findByIdAndUpdate( studentId, updates, {
+    const updateStudent = await Student.findByIdAndUpdate( studentId, updates, {
       new: true,
-    } );
+    } )
+
+    const updatedStudent = updateStudent.flatStudent;
+
+    try
+    {
+
+      if ( updateStudent.departmentPreferences && updateStudent.departmentPreferences.length > 0 )
+      {
+        await sendForm( updateStudent.emailId, updateStudent ); // Call the sendForm function for each student
+      }
+
+    } catch ( error )
+    {
+      console.error( 'Error sending student data via email:', error );
+    }
+
+    io.emit( 'studentUpdated', updatedStudent )
 
     return res
       .status( 200 )
@@ -636,7 +531,10 @@ const deleteStudent = asyncHandler( async ( req, res ) =>
   try
   {
     // Step 1: Validate that the student exists
-    const student = await Student.findById( studentId );
+    const student = await Student.findById( studentId ).populate( {
+      path: 'allocatedTA',
+      select: false
+    } );
     if ( !student )
     {
       return res.status( 404 ).json( { message: "Student not found" } );
@@ -656,8 +554,13 @@ const deleteStudent = asyncHandler( async ( req, res ) =>
       }
     }
 
+    await LogEntry.deleteMany( { student: studentId } )
+    await Feedback.deleteMany( { student: studentId } )
+
     // Step 3: Delete the student
     await Student.findByIdAndRemove( studentId );
+
+    io.emit( 'studentDeleted', studentId );
 
     return res.status( 200 ).json( { message: "Student deleted successfully" } );
   } catch ( error )

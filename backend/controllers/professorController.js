@@ -1,7 +1,7 @@
 const asyncHandler = require( 'express-async-handler' );
 const Professor = require( "../models/Professor" );
 const Course = require( "../models/Course" );
-const argon2 = require( 'argon2' );
+const Feedback = require( '../models/Feedback' );
 
 
 //@desc Get professor by ID
@@ -57,54 +57,75 @@ const addProfessor = asyncHandler( async ( req, res ) =>
         }
 
         var invalidProfessors = [];
+        const requiredFields = [ 'emailId', 'name' ];
 
-        for ( const professor of professorsToAdd )
-        {
-            // Check if all required fields are present
-            const requiredFields = [ 'emailId', 'password', 'name' ];
-            const missingFields = requiredFields.filter( ( field ) => !professor[ field ] );
-            if ( missingFields.length > 0 )
+        await Promise.all(
+            professorsToAdd.map( async ( professor ) =>
             {
-                invalidProfessors.push( {
-                    professor: professor,
-                    message: `Missing required fields: ${ missingFields.join( ', ' ) }`,
-                } );
-                continue; // Skip this professor and move to the next one
-            }
+                // Check if all required fields are present
+                const missingFields = requiredFields.filter( ( field ) => !professor[ field ] );
+                if ( missingFields.length > 0 )
+                {
+                    invalidProfessors.push( {
+                        professor: professor,
+                        message: `Missing required fields: ${ missingFields.join( ', ' ) }`,
+                    } );
+                    return;
+                }
 
-            // Check for emailId collisions
-            const existingProfessor = await Professor.findOne( { emailId: professor.emailId } );
-            if ( existingProfessor )
-            {
-                invalidProfessors.push( {
-                    professor: professor,
-                    message: 'Email already taken',
-                } );
-                continue; // Skip this professor and move to the next one
-            }
-
-            // Hash the password using Argon2 before saving
-            try
-            {
-                const hash = await argon2.hash( professor.password );
-                professor.password = hash;
-            } catch ( error )
-            {
-                invalidProfessors.push( {
-                    professor: professor,
-                    message: 'Error hashing the password',
-                } );
-                continue; // Skip this professor and move to the next one
-            }
-        }
-
-        // Filter out invalid professors
-        professorsToAdd = professorsToAdd.filter( ( professor ) =>
-            !invalidProfessors.some( ( invalidProf ) => invalidProf.professor.emailId === professor.emailId )
+                // Check for emailId collisions
+                const existingProfessor = await Professor.exists( { emailId: professor.emailId } );
+                if ( existingProfessor )
+                {
+                    invalidProfessors.push( {
+                        professor: professor,
+                        message: 'Email already taken',
+                    } );
+                    return;
+                }
+            } )
         );
 
+        professorsToAdd = professorsToAdd.filter(
+            ( professor ) =>
+                invalidProfessors.every( ( invalidProf ) => invalidProf.professor.emailId !== professor.emailId )
+        );
+
+
+        // for ( const professor of professorsToAdd )
+        // {
+        //     // Check if all required fields are present
+        //     const requiredFields = [ 'emailId', 'name' ];
+        //     const missingFields = requiredFields.filter( ( field ) => !professor[ field ] );
+        //     if ( missingFields.length > 0 )
+        //     {
+        //         invalidProfessors.push( {
+        //             professor: professor,
+        //             message: `Missing required fields: ${ missingFields.join( ', ' ) }`,
+        //         } );
+        //         continue; // Skip this professor and move to the next one
+        //     }
+
+        //     // Check for emailId collisions
+        //     const existingProfessor = await Professor.exists( { emailId: professor.emailId } );
+        //     if ( existingProfessor )
+        //     {
+        //         invalidProfessors.push( {
+        //             professor: professor,
+        //             message: 'Email already taken',
+        //         } );
+        //         continue; // Skip this professor and move to the next one
+        //     }
+        // }
+
+        // professorsToAdd = professorsToAdd.filter( ( professor ) =>
+        //     invalidProfessors.every( ( invalidProf ) => invalidProf.professor.emailId !== professor.emailId )
+        // );
+
+
         // Insert valid professors into the database
-        await Professor.insertMany( professorsToAdd );
+        await Professor.insertMany( professorsToAdd, { ordered: false } );
+
 
         return res.status( 201 ).json( {
             message: 'Professors added successfully',
@@ -136,19 +157,11 @@ const updateProfessor = asyncHandler( async ( req, res ) =>
         // Step 2: Check if emailId is being updated and if it collides with an existing email
         if ( 'emailId' in updates && updates.emailId !== professor.emailId )
         {
-            const existingProfessor = await Professor.findOne( { emailId: updates.emailId } );
+            const existingProfessor = await Professor.exists( { emailId: updates.emailId } );
             if ( existingProfessor )
             {
                 return res.status( 400 ).json( { message: 'Email already taken' } );
             }
-        }
-
-        // Step 3: Check if password is being updated and perform necessary security checks
-        if ( 'password' in updates )
-        {
-            // Hash the new password
-            const hash = await argon2.hash( updates.password );
-            updates.password = hash;
         }
 
         // Step 4: Update the professor with the validated values
@@ -171,7 +184,7 @@ const deleteProfessor = asyncHandler( async ( req, res ) =>
     try
     {
         // Check if the professor exists
-        const professor = await Professor.findById( professorId );
+        const professor = await Professor.exists( { _id: professorId } );
         if ( !professor )
         {
             return res.status( 404 ).json( { message: 'Professor not found' } );
@@ -179,6 +192,7 @@ const deleteProfessor = asyncHandler( async ( req, res ) =>
 
         // Update related Courses by setting the "professor" field to null
         await Course.updateMany( { professor: professorId }, { professor: null } );
+        await Feedback.updateMany( { professor: professorId }, { professor: null } )
 
         // Delete the professor
         await Professor.findByIdAndRemove( professorId );

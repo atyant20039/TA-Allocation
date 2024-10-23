@@ -2,7 +2,8 @@ const asyncHandler = require( 'express-async-handler' );
 const Admin = require( "../models/Admin" );
 const JM = require( "../models/JM" );
 const Professor = require( "../models/Professor" );
-const Course = require( "../models/Course" )
+const Student = require( "../models/Student" );
+const Course = require( "../models/Course" );
 const argon2 = require( 'argon2' );
 const jwt = require( "jsonwebtoken" );
 const nodemailer = require( 'nodemailer' );
@@ -13,7 +14,7 @@ const otpStorage = new Map();
 // Function to generate and store OTP
 const generateAndStoreOTP = ( email, otp ) =>
 {
-  const expirationTime =  3 * 60 * 1000; // OTP valid for 5 minutes
+  const expirationTime = 3 * 60 * 1000; // OTP valid for 3 minutes
   // Store the OTP along with its expiration time
   otpStorage.set( email, otp );
   console.log( otpStorage )
@@ -27,20 +28,28 @@ const generateAndStoreOTP = ( email, otp ) =>
 const transporter = nodemailer.createTransport( {
   service: 'Gmail',
   auth: {
-    user: 'arnav20363@iiitd.ac.in',
-    pass: 'meatiiitdelhi@123', // use env file for this data , also kuch settings account ki change krni padti vo krliyo
+    user: process.env.USERMAIL,
+    pass: process.env.PASS, // use env file for this data , also kuch settings account ki change krni padti vo krliyo
   },
 } );
 
-const sendOtp= asyncHandler(async (req, res) => {
+const sendOtp = asyncHandler( async ( req, res ) =>
+{
   const { email_id } = req.body;
-  let otp = otpGenerator.generate(6, {
+  const findStudent = await Student.findOne( { emailId: email_id } );
+  const flatenedStudents = findStudent?.flatStudentByID
+  let department = "";
+  if ( flatenedStudents )
+  {
+    department = flatenedStudents.department
+  }
+  let otp = otpGenerator.generate( 6, {
     upperCaseAlphabets: false,
     lowerCaseAlphabets: false,
     specialChars: false,
-  });
-  console.log(otp);
-  generateAndStoreOTP(email_id, otp);
+  } );
+  console.log( otp );
+  generateAndStoreOTP( email_id, otp );
 
   // Create an HTML file with the OTP and other data
   const htmlContent = `
@@ -51,8 +60,10 @@ const sendOtp= asyncHandler(async (req, res) => {
         </style>
       </head>
       <body>
-        <h1>OTP Verification</h1>
-        <p>Your OTP for verification is: <strong>${otp}</strong></p>
+        <h1>OTP Verification for TAship Form</h1>
+        <p>Your OTP for verification is: <strong>${ otp }</strong></p>
+        <p style="color:red;">This OTP is valid for 3 minutes. Please do not share it with anyone.<br/>
+        <strong>This is an Auto Generated Mail. Please do not reply.</strong></p>
       </body>
     </html>
   `;
@@ -61,33 +72,42 @@ const sendOtp= asyncHandler(async (req, res) => {
   const mailOptions = {
     from: 'btp3517@gmail.com',
     to: email_id,
-    subject: 'OTP Verification',
+    subject: 'OTP Verification for TAship Form',
     html: htmlContent,
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    res.status(200).json({ success: true, message: 'OTP sent successfully' });
-  } catch (error) {
-    console.error('Error sending OTP:', error);
-    res.status(500).json({ success: false, message: 'Failed to send OTP' });
+  try
+  {
+    console.log( ":", department, ":" )
+    await transporter.sendMail( mailOptions );
+    res.status( 200 ).json( { success: true, message: 'OTP sent successfully', studentExist: flatenedStudents, department: department } );
+  } catch ( error )
+  {
+    console.error( 'Error sending OTP:', error );
+    res.status( 500 ).json( { success: false, message: 'Failed to send OTP', studentExist: flatenedStudents, department: department } );
   }
-});
+} );
 
 
-const verifyOtp = asyncHandler( async ( req, res ) =>
+const handleTAlogin = asyncHandler( async ( req, res ) =>
 {
   const { email, enteredOTP } = req.body;
-  console.log( 'Entered OTP:', enteredOTP );
   const storedOTP = otpStorage.get( email );
-  console.log( 'Stored OTP:', storedOTP );
 
   if ( !storedOTP || storedOTP.toString() !== enteredOTP.toString() )
   {
     return res.status( 400 ).json( { success: false, message: 'Invalid OTP' } );
   }
 
-  res.status( 200 ).json( { success: true, message: 'OTP verified successfully' } );
+  const data = {
+    user: {
+      role: "TA",
+    },
+  };
+
+  const authtoken = jwt.sign( data, JWT_SECRET );
+
+  res.status( 200 ).json( { success: true, message: 'OTP verified successfully', authtoken } );
 } );
 
 const addAdmin = asyncHandler( async ( req, res ) =>
@@ -95,7 +115,7 @@ const addAdmin = asyncHandler( async ( req, res ) =>
   const { email_id, password } = req.body;
 
   // Check if the admin with the same email already exists
-  const adminExists = await Admin.findOne( { emailId: email_id } );
+  const adminExists = await Admin.exists( { emailId: email_id } );
   if ( adminExists )
   {
     return res.status( 400 ).json( { error: "Admin with this email already exists" } );
@@ -130,7 +150,7 @@ const adminLogin = asyncHandler( async ( req, res ) =>
 
   if ( !user )
   {
-    return res.status( 400 ).json( { error: "Please enter valid credentials" } );
+    return res.status( 400 ).json( { success: false, error: "Please enter valid credentials" } );
   }
 
   const passwordMatch = await argon2.verify( user.password, password );
@@ -143,8 +163,8 @@ const adminLogin = asyncHandler( async ( req, res ) =>
   const data = {
     user: {
       id: user.id,
-      role:"admin",
-      department:"all"
+      role: "admin",
+      department: "all"
     },
   };
 
@@ -154,67 +174,110 @@ const adminLogin = asyncHandler( async ( req, res ) =>
   res.json( { success, authtoken } );
 } );
 
-const JMLogin = asyncHandler(async (req, res) => {
-  const { email_id, password } = req.body;
-  let user = await JM.findOne({ emailId: email_id });
-  if (!user) {
-    return res.status(400).json({ error: "Please enter valid credentials" });
+const JMotp = asyncHandler( async ( req, res ) =>
+{
+  const { email_id, enteredOTP } = req.body;
+
+  const storedOTP = otpStorage.get( email_id );
+
+
+  if ( !storedOTP || storedOTP.toString() !== enteredOTP.toString() )
+  {
+    return res.status( 400 ).json( { success: false, message: 'Invalid OTP' } );
   }
-
-  const passwordMatch = await argon2.verify(user.password, password);
-
-  if (!passwordMatch) {
-    return res.status(400).json({ success: false, error: "Please enter valid credentials" });
+  let user = await JM.findOne( { emailId: email_id } );
+  if ( !user )
+  {
+    return res.status( 400 ).json( { error: "Please enter valid credentials" } );
   }
-
-  console.log(user.department)
 
   // Find if the professor teaches any courses
-  const professorId = user._id; // Get the professor's ID
-  const coursesTaught = await Course.find( { professor: professorId } );
+  // const coursesTaught = await Course.find( { professor: professorId } );
 
   const data = {
     user: {
       id: user.id,
       department: user.department,
-      role:"jm" // Include the department in the token
+      role: "jm" // Include the department in the token
     },
   };
 
-  const authtoken = jwt.sign(data, JWT_SECRET);
+  const authtoken = jwt.sign( data, JWT_SECRET );
   const success = true;
 
-  res.json({ success, authtoken });
-});
+  res.json( { success, authtoken, message: 'OTP verified successfully' } );
+} );
 
 
-const ProfessorLogin = asyncHandler(async (req, res) => {
-  const { email_id, password } = req.body;
-  let user = await Professor.findOne({ emailId: email_id });
-  if (!user) {
-    return res.status(400).json({ error: "Please enter valid credentials" });
+const Professorotp = asyncHandler( async ( req, res ) =>
+{
+  const { email_id, enteredOTP } = req.body;
+
+  const storedOTP = otpStorage.get( email_id );
+
+  if ( !storedOTP || storedOTP.toString() !== enteredOTP.toString() )
+  {
+    return res.status( 400 ).json( { success: false, message: 'Invalid OTP' } );
   }
 
-  const passwordMatch = await argon2.verify(user.password, password);
-
-  if (!passwordMatch) {
-    return res.status(400).json({ success: false, error: "Please enter valid credentials" });
+  let user = await Professor.findOne( { emailId: email_id } );
+  if ( !user )
+  {
+    return res.status( 400 ).json( { error: "Invalid Email ID" } );
   }
 
   // Find if the professor teaches any courses
-  const professorId = user._id; // Get the professor's ID
   const data = {
     user: {
       id: user.id,
       department: user.department,
-      role: 'professor' 
+      role: 'professor'
     },
   };
-  const authtoken = jwt.sign(data, JWT_SECRET);
+
+  const authtoken = jwt.sign( data, JWT_SECRET );
   const success = true;
 
-  res.json({ success, authtoken });
-});
+
+  res.json( { success, authtoken, name: user.name, message: 'OTP verified successfully' } );
+} );
 
 
-module.exports = { adminLogin, ProfessorLogin, JMLogin, sendOtp, verifyOtp, addAdmin };
+const verifyOtp = async ( req, res ) =>
+{
+  const { email, enteredOTP } = req.body;
+  console.log( 'Entered OTP:', enteredOTP );
+  const storedOTP = otpStorage.get( email );
+  console.log( 'Stored OTP:', storedOTP );
+
+  if ( !storedOTP || storedOTP.toString() !== enteredOTP.toString() )
+  {
+    return res.status( 400 ).json( { success: false, message: 'Invalid OTP' } );
+  }
+
+  res.status( 200 ).json( { success: true, message: 'OTP verified successfully' } );
+};
+
+
+const forgotPassword = async ( req, res ) =>
+{
+  try
+  {
+    const { email, password } = req.body;
+    const admin = await Admin.findOne( { emailId: email } );
+    if ( !admin )
+    {
+      return res.status( 400 ).json( { success: false, message: 'No user registed with this Email Id' } )
+    }
+    const hashedPassword = await argon2.hash( password );
+    admin.password = hashedPassword;
+    await admin.save();
+    res.status( 200 ).json( { success: true, message: "password updated successfully" } );
+  } catch ( error )
+  {
+    res.status( 500 ).json( { success: false, message: 'Internal Server Error' } );
+  }
+}
+
+
+module.exports = { Professorotp, JMotp, adminLogin, sendOtp, handleTAlogin, addAdmin, verifyOtp, forgotPassword };
